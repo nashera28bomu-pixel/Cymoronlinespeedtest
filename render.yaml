@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: cymortune
+    runtime: node
+    plan: free
+    buildCommand: npm install && pip3 install -U yt-dlp
+    startCommand: node server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      - key: YTDLP_PATH
+        value: yt-dlp
