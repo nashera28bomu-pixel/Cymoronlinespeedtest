@@ -3,17 +3,16 @@ services:
     name: cymortune
     runtime: node
     plan: free
-    # Updated buildCommand to handle the environment restriction
     buildCommand: >-
       npm install && 
-      apt-get update && apt-get install -y ffmpeg && 
-      pip3 install -U yt-dlp --break-system-packages
+      apt-get update && apt-get install -y ffmpeg python3-venv && 
+      python3 -m venv venv && 
+      ./venv/bin/pip install -U yt-dlp && 
+      cp ./venv/bin/yt-dlp ./yt-dlp-bin
     startCommand: node server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "3000"
       - key: YTDLP_PATH
-        value: /usr/local/bin/yt-dlp
+        value: ./yt-dlp-bin
