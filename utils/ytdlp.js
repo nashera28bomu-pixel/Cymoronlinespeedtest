@@ -5,28 +5,17 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const YTDLP     = process.env.YTDLP_PATH || 'yt-dlp';
-const YT_KEY    = process.env.YT_API_KEY  || '';
-const TMP       = path.resolve(__dirname, '../tmp');
+const YTDLP        = process.env.YTDLP_PATH     || 'yt-dlp';
+const YT_KEY       = process.env.YT_API_KEY      || '';
+const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY    || '';
+const TMP          = path.resolve(__dirname, '../tmp');
 
 if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
 
-// ─── Free Piped instances (no API key, no bot detection) ──────────────────────
-const PIPED_INSTANCES = [
-  'https://pipedapi.kavin.rocks',
-  'https://piped-api.garudalinux.org',
-  'https://api.piped.projectsegfau.lt',
-  'https://pipedapi.coldvibes.top',
-];
+const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
+const INNERTUBE_VER = '2.20240101.00.00';
+const BROWSER_UA    = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-// ─── Free Invidious instances ─────────────────────────────────────────────────
-const INVIDIOUS_INSTANCES = [
-  'https://invidious.nerdvpn.de',
-  'https://invidious.privacydev.net',
-  'https://inv.tux.pizza',
-];
-
-// ─── Detect platform ──────────────────────────────────────────────────────────
 export function detectPlatform(url) {
   if (!url) return 'unknown';
   if (/youtube\.com|youtu\.be/i.test(url))  return 'youtube';
@@ -39,105 +28,129 @@ export function detectPlatform(url) {
   return 'unknown';
 }
 
-// ─── Main Search ──────────────────────────────────────────────────────────────
 export async function searchYoutube(query, limit = 12) {
-  // Priority: Official API → Piped → Invidious → yt-dlp fallback
+  try {
+    const r = await searchViaInnerTube(query, limit);
+    if (r.length) { console.log('[Search] ✓ InnerTube'); return r; }
+  } catch (e) { console.warn('[Search] InnerTube failed:', e.message); }
+
+  if (RAPIDAPI_KEY) {
+    try {
+      const r = await searchViaRapidAPI(query, limit);
+      if (r.length) { console.log('[Search] ✓ RapidAPI'); return r; }
+    } catch (e) { console.warn('[Search] RapidAPI failed:', e.message); }
+  }
+
   if (YT_KEY) {
-    try { return await searchViaAPI(query, limit); } catch (e) {
-      console.warn('[Search] YouTube API failed, falling back:', e.message);
-    }
-  }
-
-  // Try Piped instances
-  for (const base of PIPED_INSTANCES) {
     try {
-      const results = await searchViaPiped(base, query, limit);
-      if (results.length) {
-        console.log(`[Search] Piped success via ${base}`);
-        return results;
-      }
-    } catch (e) {
-      console.warn(`[Search] Piped failed (${base}):`, e.message);
-    }
+      const r = await searchViaOfficialAPI(query, limit);
+      if (r.length) { console.log('[Search] ✓ Official API'); return r; }
+    } catch (e) { console.warn('[Search] Official API failed:', e.message); }
   }
 
-  // Try Invidious instances
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const results = await searchViaInvidious(base, query, limit);
-      if (results.length) {
-        console.log(`[Search] Invidious success via ${base}`);
-        return results;
-      }
-    } catch (e) {
-      console.warn(`[Search] Invidious failed (${base}):`, e.message);
-    }
-  }
-
-  // Last resort: yt-dlp with anti-bot headers
-  console.log('[Search] All APIs failed, trying yt-dlp with anti-bot headers...');
+  console.log('[Search] Falling back to yt-dlp...');
   return searchViaYtdlp(query, limit);
 }
 
-// ─── Piped API Search ─────────────────────────────────────────────────────────
-async function searchViaPiped(baseUrl, query, limit) {
-  const url = `${baseUrl}/search?q=${encodeURIComponent(query)}&filter=videos`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(10000),
-    headers: { 'User-Agent': 'CymorTune/1.0' },
-  });
-  if (!res.ok) throw new Error(`Piped HTTP ${res.status}`);
+async function searchViaInnerTube(query, limit) {
+  const res = await fetch(
+    `https://www.youtube.com/youtubei/v1/search?key=${INNERTUBE_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-YouTube-Client-Name': '1',
+        'X-YouTube-Client-Version': INNERTUBE_VER,
+        'User-Agent': BROWSER_UA,
+        'Origin': 'https://www.youtube.com',
+        'Referer': 'https://www.youtube.com/',
+      },
+      body: JSON.stringify({
+        query,
+        params: 'EgIQAQ%3D%3D',
+        context: {
+          client: {
+            clientName: 'WEB',
+            clientVersion: INNERTUBE_VER,
+            hl: 'en', gl: 'US',
+            userAgent: BROWSER_UA,
+          },
+        },
+      }),
+      signal: AbortSignal.timeout(12000),
+    }
+  );
+
+  if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
   const data = await res.json();
 
-  const items = (data.items || []).filter(i => i.type === 'stream' || i.url?.startsWith('/watch'));
-  if (!items.length) throw new Error('No results');
+  const contents =
+    data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
+      ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
 
-  return items.slice(0, limit).map(item => {
-    const videoId = (item.url || '').replace('/watch?v=', '');
-    return {
-      id: videoId,
-      title: item.title || 'Unknown',
-      duration: formatDuration(item.duration || 0),
-      thumbnail: item.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-      author: item.uploaderName || item.uploader || '',
-      url: `https://www.youtube.com/watch?v=${videoId}`,
+  const results = [];
+  for (const item of contents) {
+    if (results.length >= limit) break;
+    const v = item.videoRenderer;
+    if (!v?.videoId) continue;
+    results.push({
+      id: v.videoId,
+      title: v.title?.runs?.[0]?.text || 'Unknown',
+      duration: v.lengthText?.simpleText || '',
+      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+      author: v.ownerText?.runs?.[0]?.text || v.shortBylineText?.runs?.[0]?.text || '',
+      url: `https://www.youtube.com/watch?v=${v.videoId}`,
       platform: 'youtube',
-      views: formatViews(item.views),
-    };
-  });
+      views: v.viewCountText?.simpleText?.replace(' views', '').replace(' view', '') || null,
+    });
+  }
+
+  if (!results.length) throw new Error('InnerTube returned 0 videos');
+  return results;
 }
 
-// ─── Invidious API Search ─────────────────────────────────────────────────────
-async function searchViaInvidious(baseUrl, query, limit) {
-  const url = `${baseUrl}/api/v1/search?q=${encodeURIComponent(query)}&type=video&page=1`;
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(10000),
-    headers: { 'User-Agent': 'CymorTune/1.0' },
-  });
-  if (!res.ok) throw new Error(`Invidious HTTP ${res.status}`);
-  const items = await res.json();
-  if (!Array.isArray(items) || !items.length) throw new Error('No results');
-
-  return items.slice(0, limit).map(item => ({
-    id: item.videoId,
-    title: item.title || 'Unknown',
-    duration: formatDuration(item.lengthSeconds || 0),
-    thumbnail: `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg`,
-    author: item.author || '',
-    url: `https://www.youtube.com/watch?v=${item.videoId}`,
-    platform: 'youtube',
-    views: formatViews(item.viewCount),
-  }));
-}
-
-// ─── Official YouTube API ─────────────────────────────────────────────────────
-async function searchViaAPI(query, limit) {
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&maxResults=${limit}&type=video&key=${YT_KEY}`;
-  const res  = await fetch(url, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error(`YouTube API error: ${res.status}`);
+async function searchViaRapidAPI(query, limit) {
+  const res = await fetch(
+    `https://youtube-search-and-download.p.rapidapi.com/search?query=${encodeURIComponent(query)}&hl=en&gl=US`,
+    {
+      headers: {
+        'x-rapidapi-key': RAPIDAPI_KEY,
+        'x-rapidapi-host': 'youtube-search-and-download.p.rapidapi.com',
+      },
+      signal: AbortSignal.timeout(10000),
+    }
+  );
+  if (!res.ok) throw new Error(`RapidAPI HTTP ${res.status}`);
   const data = await res.json();
-  if (!data.items?.length) throw new Error('No results found');
 
+  const items = data?.contents || [];
+  const results = [];
+  for (const item of items) {
+    if (results.length >= limit) break;
+    const v = item?.video;
+    if (!v?.videoId) continue;
+    results.push({
+      id: v.videoId,
+      title: v.title || 'Unknown',
+      duration: v.lengthText || '',
+      thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`,
+      author: v.author || '',
+      url: `https://www.youtube.com/watch?v=${v.videoId}`,
+      platform: 'youtube',
+      views: v.viewCount || null,
+    });
+  }
+
+  if (!results.length) throw new Error('RapidAPI returned 0 videos');
+  return results;
+}
+
+async function searchViaOfficialAPI(query, limit) {
+  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&maxResults=${limit}&type=video&key=${YT_KEY}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`YouTube API ${res.status}`);
+  const data = await res.json();
+  if (!data.items?.length) throw new Error('No results');
   return data.items.map(item => ({
     id: item.id.videoId,
     title: item.snippet.title,
@@ -150,112 +163,108 @@ async function searchViaAPI(query, limit) {
   }));
 }
 
-// ─── yt-dlp fallback with anti-bot headers ────────────────────────────────────
 async function searchViaYtdlp(query, limit) {
   return new Promise((resolve, reject) => {
-    const args = [
+    const proc = spawn(YTDLP, [
       `ytsearch${limit}:${query}`,
-      '--dump-json',
-      '--no-playlist',
-      '--no-warnings',
-      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '--dump-json', '--no-playlist', '--no-warnings',
+      '--add-header', `User-Agent:${BROWSER_UA}`,
       '--add-header', 'Accept-Language:en-US,en;q=0.9',
-      '--sleep-interval', '1',
       '--extractor-retries', '3',
-    ];
-    const proc = spawn(YTDLP, args);
-    let out = '';
-    let errOut = '';
+    ]);
+    let out = '', err = '';
     proc.stdout.on('data', d => out += d);
-    proc.stderr.on('data', d => errOut += d);
-
-    const t = setTimeout(() => { proc.kill(); reject(new Error('Search timed out after 30s')); }, 30000);
-
+    proc.stderr.on('data', d => err += d);
+    const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timed out')); }, 35000);
     proc.on('close', code => {
       clearTimeout(t);
       if (code !== 0) {
-        console.error('[yt-dlp stderr]', errOut.slice(0, 300));
-        return reject(new Error('Search tool failed'));
+        console.error('[yt-dlp]', err.slice(0, 400));
+        return reject(new Error('yt-dlp search failed'));
       }
       try {
-        const results = out.trim().split('\n')
-          .filter(Boolean)
-          .map(line => {
+        resolve(
+          out.trim().split('\n').filter(Boolean).map(line => {
             const d = JSON.parse(line);
             return {
-              id: d.id,
-              title: d.title,
+              id: d.id, title: d.title,
               duration: formatDuration(d.duration || 0),
               thumbnail: d.thumbnail,
               author: d.uploader || d.channel,
-              url: d.webpage_url,
-              platform: 'youtube',
+              url: d.webpage_url, platform: 'youtube',
               views: formatViews(d.view_count),
             };
-          });
-        resolve(results);
-      } catch (e) {
-        reject(new Error('Could not parse search results'));
-      }
+          })
+        );
+      } catch { reject(new Error('yt-dlp parse failed')); }
     });
   });
 }
 
-// ─── Get media info from URL ──────────────────────────────────────────────────
 export async function getMediaInfo(url) {
   const platform = detectPlatform(url);
-  if (platform === 'youtube' && YT_KEY) {
-    try { return await getYouTubeInfo(url); } catch {}
+  const videoId  = platform === 'youtube' ? extractYouTubeId(url) : null;
+
+  if (videoId) {
+    try {
+      const info = await getInfoViaInnerTube(videoId, url);
+      if (info) return info;
+    } catch (e) { console.warn('[Info] InnerTube failed:', e.message); }
   }
 
-  // Try Piped for YouTube URLs
-  if (platform === 'youtube') {
-    const videoId = extractYouTubeId(url);
-    if (videoId) {
-      for (const base of PIPED_INSTANCES) {
-        try {
-          const res = await fetch(`${base}/streams/${videoId}`, {
-            signal: AbortSignal.timeout(8000),
-            headers: { 'User-Agent': 'CymorTune/1.0' },
-          });
-          if (res.ok) {
-            const d = await res.json();
-            return {
-              id: videoId,
-              title: d.title || 'Unknown',
-              author: d.uploader || '',
-              duration: formatDuration(d.duration || 0),
-              thumbnail: d.thumbnailUrl || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-              url,
-              platform,
-              views: formatViews(d.views),
-              formats: [
-                { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
-                { label: 'MP3 320kbps', type: 'mp3', quality: '320' },
-                { label: 'MP4 720p',    type: 'mp4', quality: '720'  },
-                { label: 'MP4 1080p',   type: 'mp4', quality: '1080' },
-              ],
-            };
-          }
-        } catch (e) {
-          console.warn(`[Info] Piped failed (${base}):`, e.message);
-        }
-      }
-    }
+  if (YT_KEY && videoId) {
+    try { return await getYouTubeAPIInfo(url, videoId); } catch {}
   }
 
   return getInfoViaYtdlp(url, platform);
 }
 
-async function getYouTubeInfo(url) {
-  const videoId = extractYouTubeId(url);
-  if (!videoId) return getInfoViaYtdlp(url, 'youtube');
-  const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoId}&key=${YT_KEY}`;
-  const res = await fetch(apiUrl, { signal: AbortSignal.timeout(10000) });
+async function getInfoViaInnerTube(videoId, originalUrl) {
+  const res = await fetch(
+    `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-YouTube-Client-Name': '1',
+        'X-YouTube-Client-Version': INNERTUBE_VER,
+        'User-Agent': BROWSER_UA,
+        'Origin': 'https://www.youtube.com',
+      },
+      body: JSON.stringify({
+        videoId,
+        context: { client: { clientName: 'WEB', clientVersion: INNERTUBE_VER, hl: 'en', gl: 'US' } },
+      }),
+      signal: AbortSignal.timeout(10000),
+    }
+  );
+  if (!res.ok) throw new Error(`InnerTube player HTTP ${res.status}`);
+  const d = await res.json();
+  const det = d?.videoDetails;
+  if (!det) throw new Error('No videoDetails');
+  return {
+    id: videoId,
+    title: det.title || 'Unknown',
+    author: det.author || '',
+    duration: formatDuration(parseInt(det.lengthSeconds) || 0),
+    thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+    url: originalUrl, platform: 'youtube',
+    views: formatViews(parseInt(det.viewCount)),
+    formats: [
+      { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
+      { label: 'MP3 320kbps', type: 'mp3', quality: '320' },
+      { label: 'MP4 360p',    type: 'mp4', quality: '360'  },
+      { label: 'MP4 720p',    type: 'mp4', quality: '720'  },
+      { label: 'MP4 1080p',   type: 'mp4', quality: '1080' },
+    ],
+  };
+}
+
+async function getYouTubeAPIInfo(url, videoId) {
+  const res  = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${videoId}&key=${YT_KEY}`, { signal: AbortSignal.timeout(10000) });
   const data = await res.json();
   const item = data.items?.[0];
-  if (!item) return getInfoViaYtdlp(url, 'youtube');
-
+  if (!item) throw new Error('No item');
   return {
     id: videoId,
     title: item.snippet.title,
@@ -265,7 +274,6 @@ async function getYouTubeInfo(url) {
     url: `https://www.youtube.com/watch?v=${videoId}`,
     platform: 'youtube',
     views: formatViews(parseInt(item.statistics?.viewCount)),
-    likes: formatViews(parseInt(item.statistics?.likeCount)),
     formats: [
       { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
       { label: 'MP3 320kbps', type: 'mp3', quality: '320' },
@@ -277,30 +285,25 @@ async function getYouTubeInfo(url) {
 
 function getInfoViaYtdlp(url, platform) {
   return new Promise((resolve, reject) => {
-    const args = [
+    const proc = spawn(YTDLP, [
       '--dump-json', '--no-playlist', '--no-warnings', '--skip-download',
-      '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      '--add-header', `User-Agent:${BROWSER_UA}`,
       url,
-    ];
-    const proc = spawn(YTDLP, args);
+    ]);
     let out = '';
     proc.stdout.on('data', d => out += d);
-
-    const t = setTimeout(() => { proc.kill(); reject(new Error('Info fetch timed out')); }, 20000);
-
+    const t = setTimeout(() => { proc.kill(); reject(new Error('Info timed out')); }, 20000);
     proc.on('close', code => {
       clearTimeout(t);
       if (code !== 0) return reject(new Error('Could not fetch media info'));
       try {
         const d = JSON.parse(out.trim().split('\n')[0]);
         resolve({
-          id: d.id,
-          title: d.title || 'Unknown',
+          id: d.id, title: d.title || 'Unknown',
           author: d.uploader || d.channel || '',
           duration: formatDuration(d.duration || 0),
           thumbnail: d.thumbnail || '',
-          url: d.webpage_url || url,
-          platform,
+          url: d.webpage_url || url, platform,
           views: formatViews(d.view_count),
           formats: [
             { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
@@ -314,49 +317,42 @@ function getInfoViaYtdlp(url, platform) {
   });
 }
 
-// ─── Stream download ──────────────────────────────────────────────────────────
 export function streamDownload(url, format, quality, res, filename) {
   const args = [
-    '--no-warnings', '--no-playlist',
-    '-o', '-',
-    '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    '--no-warnings', '--no-playlist', '-o', '-',
+    '--add-header', `User-Agent:${BROWSER_UA}`,
+    '--add-header', 'Accept-Language:en-US,en;q=0.9',
   ];
-
   if (format === 'mp3') {
     args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320' ? '0' : '5');
   } else {
-    const h = quality === '1080' ? '1080' : quality === '720' ? '720' : quality === '480' ? '480' : '360';
-    args.push('--format', `bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`);
+    const h = ['1080','720','480','360'].includes(quality) ? quality : '720';
+    args.push('--format', `bestvideo[height<=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`);
   }
-
   args.push(url);
 
   const proc = spawn(YTDLP, args);
   res.setHeader('Content-Type', format === 'mp3' ? 'audio/mpeg' : 'video/mp4');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename || 'cymortune'}.${format}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${(filename || 'cymortune').replace(/[^\w\s-]/g, '')}.${format}"`);
   proc.stdout.pipe(res);
-  proc.stderr.on('data', d => console.warn('[Download stderr]', d.toString().slice(0, 100)));
-  proc.on('close', () => res.end());
-  res.on('close', () => proc.kill());
+  proc.stderr.on('data', d => console.warn('[DL]', d.toString().slice(0, 120)));
+  proc.on('close', () => { try { res.end(); } catch {} });
+  res.on('close',  () => { try { proc.kill(); } catch {} });
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 function extractYouTubeId(url) {
-  const m = url.match(/(?:v=|youtu\.be\/|embed\/)([a-zA-Z0-9_-]{11})/);
-  return m?.[1] || null;
+  return url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/)?.[1] || null;
 }
 function parseDuration(iso) {
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!m) return '';
-  const h = m[1] ? `${m[1]}:` : '';
-  return `${h}${m[2] || '0'}:${String(m[3] || '0').padStart(2, '0')}`;
+  const m = iso?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return '0:00';
+  return `${m[1] ? m[1]+':' : ''}${m[2]||'0'}:${String(m[3]||'0').padStart(2,'0')}`;
 }
 function formatDuration(s) {
   if (!s || isNaN(s)) return '0:00';
-  const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2, '0')}`;
+  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 }
 function formatViews(n) {
   if (!n || isNaN(n)) return null;
-  return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
-}
+  return n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : String(n);
+                                                        }
