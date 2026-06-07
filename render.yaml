@@ -3,8 +3,14 @@ services:
     name: cymortune
     runtime: node
     plan: free
-    # Remove --user, just install it directly
-    buildCommand: npm install && pip3 install -U yt-dlp
+    # 1. Update npm packages
+    # 2. Install FFmpeg (using apt-get, which is available in Render's environment)
+    # 3. Install the 'default' yt-dlp extras (includes JS solvers for YouTube challenges)
+    buildCommand: |
+      npm install && \
+      apt-get update && apt-get install -y ffmpeg && \
+      pip3 install -U "yt-dlp[default]"
+      
     startCommand: node server.js
     healthCheckPath: /health
     envVars:
@@ -12,6 +18,6 @@ services:
         value: production
       - key: PORT
         value: "3000"
-      # Just use 'yt-dlp' as the command; the environment will find it automatically
+      # This points to the binary installed via pip
       - key: YTDLP_PATH
-        value: yt-dlp
+        value: /usr/local/bin/yt-dlp
