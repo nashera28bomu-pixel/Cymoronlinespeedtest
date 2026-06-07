@@ -3,15 +3,16 @@ services:
     name: cymortune
     runtime: node
     plan: free
-    # No more pip, no more virtual environments
     buildCommand: >-
-      npm install && 
-      apt-get update && apt-get install -y ffmpeg
+      npm install &&
+      apt-get update -qq &&
+      apt-get install -y ffmpeg &&
+      curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /opt/render/project/src/yt-dlp &&
+      chmod a+rx /opt/render/project/src/yt-dlp
     startCommand: node server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      # Point to the local node_modules version
       - key: YTDLP_PATH
-        value: ./node_modules/yt-dlp/bin/yt-dlp
+        value: /opt/render/project/src/yt-dlp
