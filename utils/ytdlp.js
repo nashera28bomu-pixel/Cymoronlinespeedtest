@@ -87,7 +87,7 @@ async function searchViaInnerTube(query, limit) {
 
   const contents =
     data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
-    ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+   ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
 
   const results = [];
   for (const item of contents) {
@@ -309,9 +309,9 @@ function getInfoViaYtdlp(url, platform) {
       args.push('--cookies', COOKIE_FILE);
     }
 
-    // Bypass YouTube bot check using Android client
     if (platform === 'youtube') {
       args.push('--extractor-args', 'youtube:player_client=android');
+      args.push('--force-ipv4'); // Force IPv4 to bypass Render IPv6 blocks
     }
 
     args.push(url);
@@ -360,10 +360,10 @@ export function streamDownload(url, format, quality, res, filename) {
     args.push('--cookies', COOKIE_FILE);
   }
 
-  // Bypass YouTube bot check using Android client
   const platform = detectPlatform(url);
   if (platform === 'youtube') {
     args.push('--extractor-args', 'youtube:player_client=android');
+    args.push('--force-ipv4'); // Force IPv4 to bypass Render IPv6 blocks
   }
 
   if (format === 'mp3') {
@@ -401,4 +401,4 @@ function formatDuration(s) {
 function formatViews(n) {
   if (!n || isNaN(n)) return null;
   return n >= 1e6? (n / 1e6).toFixed(1) + 'M' : n >= 1e3? (n / 1e3).toFixed(1) + 'K' : String(n);
-}
+    }
