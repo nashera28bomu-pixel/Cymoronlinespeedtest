@@ -3,7 +3,8 @@ services:
     name: cymortune
     runtime: node
     plan: free
-    buildCommand: npm install && pip3 install -U yt-dlp
+    # Installs yt-dlp into the local project directory
+    buildCommand: npm install && pip3 install --user -U yt-dlp
     startCommand: node server.js
     healthCheckPath: /health
     envVars:
@@ -11,5 +12,6 @@ services:
         value: production
       - key: PORT
         value: "3000"
+      # Points directly to the user-installed binary path
       - key: YTDLP_PATH
-        value: yt-dlp
+        value: /opt/render/project/src/.local/bin/yt-dlp
