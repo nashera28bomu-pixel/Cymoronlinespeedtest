@@ -16,7 +16,12 @@ router.get('/', async (req, res) => {
     res.json({ success: true, results, query: q });
   } catch (err) {
     console.error(`[Search error] ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
+    // Return user-friendly error, not raw yt-dlp message
+    res.status(500).json({
+      success: false,
+      error: 'Search temporarily unavailable. Please try again.',
+      detail: err.message,
+    });
   }
 });
 
@@ -31,7 +36,11 @@ router.get('/info', async (req, res) => {
     res.json({ success: true, info });
   } catch (err) {
     console.error(`[Info error] ${err.message}`);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({
+      success: false,
+      error: 'Could not fetch media info. Check the URL and try again.',
+      detail: err.message,
+    });
   }
 });
 
