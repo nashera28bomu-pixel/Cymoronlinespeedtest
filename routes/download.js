@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
   activeDownloads++;
 
   try {
-    streamDownload(url.trim(), format, quality, res, title);
+    streamDownload(req, res);
 
     res.on('finish', () => { activeDownloads = Math.max(0, activeDownloads - 1); });
     res.on('close',  () => { activeDownloads = Math.max(0, activeDownloads - 1); });
