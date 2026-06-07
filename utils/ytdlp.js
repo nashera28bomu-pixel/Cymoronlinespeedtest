@@ -5,7 +5,9 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
+// Ensure this matches the path we just created
+const YTDLP = process.env.YTDLP_PATH || './yt-dlp-bin';
+
 const YT_KEY = process.env.YT_API_KEY || '';
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
 const TMP = path.resolve(__dirname, '../tmp');
