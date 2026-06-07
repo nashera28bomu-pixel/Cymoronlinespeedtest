@@ -87,7 +87,7 @@ async function searchViaInnerTube(query, limit) {
 
   const contents =
     data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
-     ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+    ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
 
   const results = [];
   for (const item of contents) {
@@ -175,7 +175,9 @@ async function searchViaYtdlp(query, limit) {
       '--sleep-requests', '1',
     ];
 
-    // Add cookies if available - this fixes "sign in to confirm" error
+    console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
+    console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
+
     if (fs.existsSync(COOKIE_FILE)) {
       args.push('--cookies', COOKIE_FILE);
       console.log('[yt-dlp] Using cookies.txt');
@@ -298,12 +300,21 @@ function getInfoViaYtdlp(url, platform) {
     const args = [
       '--dump-json', '--no-playlist', '--no-warnings', '--skip-download',
       '--add-header', `User-Agent:${BROWSER_UA}`,
-      url,
     ];
+
+    console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
+    console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
 
     if (fs.existsSync(COOKIE_FILE)) {
       args.push('--cookies', COOKIE_FILE);
     }
+
+    // Bypass YouTube bot check using Android client
+    if (platform === 'youtube') {
+      args.push('--extractor-args', 'youtube:player_client=android');
+    }
+
+    args.push(url);
 
     const proc = spawn(YTDLP, args);
     let out = '';
@@ -342,9 +353,17 @@ export function streamDownload(url, format, quality, res, filename) {
     '--sleep-requests', '1',
   ];
 
-  // Critical: Use cookies to bypass YouTube bot detection
+  console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
+  console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
+
   if (fs.existsSync(COOKIE_FILE)) {
     args.push('--cookies', COOKIE_FILE);
+  }
+
+  // Bypass YouTube bot check using Android client
+  const platform = detectPlatform(url);
+  if (platform === 'youtube') {
+    args.push('--extractor-args', 'youtube:player_client=android');
   }
 
   if (format === 'mp3') {
@@ -373,13 +392,13 @@ function extractYouTubeId(url) {
 function parseDuration(iso) {
   const m = iso?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!m) return '0:00';
-  return `${m[1]? m[1]+':' : ''}${m[2]||'0'}:${String(m[3]||'0').padStart(2,'0')}`;
+  return `${m[1]? m[1] + ':' : ''}${m[2] || '0'}:${String(m[3] || '0').padStart(2, '0')}`;
 }
 function formatDuration(s) {
   if (!s || isNaN(s)) return '0:00';
-  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 function formatViews(n) {
   if (!n || isNaN(n)) return null;
-  return n >= 1e6? (n/1e6).toFixed(1)+'M' : n >= 1e3? (n/1e3).toFixed(1)+'K' : String(n);
+  return n >= 1e6? (n / 1e6).toFixed(1) + 'M' : n >= 1e3? (n / 1e3).toFixed(1) + 'K' : String(n);
 }
