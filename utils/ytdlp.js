@@ -1,4 +1,4 @@
-// ─── utils/ytdlp.js ───────────────────────────────────────────────────────────
+// ─── utils/ytdlp.js (Part 1) ──────────────────────────────────────────────────
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs';
@@ -16,6 +16,7 @@ if (!fs.existsSync(TMP)) fs.mkdirSync(TMP, { recursive: true });
 const INNERTUBE_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 const INNERTUBE_VER = '2.20240101.00.00';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
 export function detectPlatform(url) {
   if (!url) return 'unknown';
@@ -54,41 +55,27 @@ export async function searchYoutube(query, limit = 12) {
 }
 
 async function searchViaInnerTube(query, limit) {
-  const res = await fetch(
-    `https://www.youtube.com/youtubei/v1/search?key=${INNERTUBE_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-YouTube-Client-Name': '1',
-        'X-YouTube-Client-Version': INNERTUBE_VER,
-        'User-Agent': BROWSER_UA,
-        'Origin': 'https://www.youtube.com',
-        'Referer': 'https://www.youtube.com/',
-      },
-      body: JSON.stringify({
-        query,
-        params: 'EgIQAQ%3D%3D',
-        context: {
-          client: {
-            clientName: 'WEB',
-            clientVersion: INNERTUBE_VER,
-            hl: 'en', gl: 'US',
-            userAgent: BROWSER_UA,
-          },
-        },
-      }),
-      signal: AbortSignal.timeout(12000),
-    }
-  );
+  const res = await fetch(`https://www.youtube.com/youtubei/v1/search?key=${INNERTUBE_KEY}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-YouTube-Client-Name': '1',
+      'X-YouTube-Client-Version': INNERTUBE_VER,
+      'User-Agent': BROWSER_UA,
+      'Origin': 'https://www.youtube.com',
+      'Referer': 'https://www.youtube.com/',
+    },
+    body: JSON.stringify({
+      query,
+      params: 'EgIQAQ%3D%3D',
+      context: { client: { clientName: 'WEB', clientVersion: INNERTUBE_VER, hl: 'en', gl: 'US', userAgent: BROWSER_UA } },
+    }),
+    signal: AbortSignal.timeout(12000),
+  });
 
   if (!res.ok) throw new Error(`InnerTube HTTP ${res.status}`);
   const data = await res.json();
-
-  const contents =
-    data?.contents?.twoColumnSearchResultsRenderer?.primaryContents
-   ?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
-
+  const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
   const results = [];
   for (const item of contents) {
     if (results.length >= limit) break;
@@ -105,25 +92,17 @@ async function searchViaInnerTube(query, limit) {
       views: v.viewCountText?.simpleText?.replace(' views', '').replace(' view', '') || null,
     });
   }
-
   if (!results.length) throw new Error('InnerTube returned 0 videos');
   return results;
 }
 
 async function searchViaRapidAPI(query, limit) {
-  const res = await fetch(
-    `https://youtube-search-and-download.p.rapidapi.com/search?query=${encodeURIComponent(query)}&hl=en&gl=US`,
-    {
-      headers: {
-        'x-rapidapi-key': RAPIDAPI_KEY,
-        'x-rapidapi-host': 'youtube-search-and-download.p.rapidapi.com',
-      },
-      signal: AbortSignal.timeout(10000),
-    }
-  );
+  const res = await fetch(`https://youtube-search-and-download.p.rapidapi.com/search?query=${encodeURIComponent(query)}&hl=en&gl=US`, {
+    headers: { 'x-rapidapi-key': RAPIDAPI_KEY, 'x-rapidapi-host': 'youtube-search-and-download.p.rapidapi.com' },
+    signal: AbortSignal.timeout(10000),
+  });
   if (!res.ok) throw new Error(`RapidAPI HTTP ${res.status}`);
   const data = await res.json();
-
   const items = data?.contents || [];
   const results = [];
   for (const item of items) {
@@ -141,7 +120,6 @@ async function searchViaRapidAPI(query, limit) {
       views: v.viewCount || null,
     });
   }
-
   if (!results.length) throw new Error('RapidAPI returned 0 videos');
   return results;
 }
@@ -169,19 +147,13 @@ async function searchViaYtdlp(query, limit) {
     const args = [
       `ytsearch${limit}:${query}`,
       '--dump-json', '--no-playlist', '--no-warnings',
-      '--add-header', `User-Agent:${BROWSER_UA}`,
-      '--add-header', 'Accept-Language:en-US,en;q=0.9',
+      '--add-header', `User-Agent:${ANDROID_UA}`,
+      '--extractor-args', 'youtube:player_client=android',
+      '--force-ipv4',
       '--extractor-retries', '3',
       '--sleep-requests', '1',
     ];
-
-    console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
-    console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
-
-    if (fs.existsSync(COOKIE_FILE)) {
-      args.push('--cookies', COOKIE_FILE);
-      console.log('[yt-dlp] Using cookies.txt');
-    }
+    if (fs.existsSync(COOKIE_FILE)) args.push('--cookies', COOKIE_FILE);
 
     const proc = spawn(YTDLP, args);
     let out = '', err = '';
@@ -190,74 +162,52 @@ async function searchViaYtdlp(query, limit) {
     const t = setTimeout(() => { proc.kill(); reject(new Error('yt-dlp timed out')); }, 35000);
     proc.on('close', code => {
       clearTimeout(t);
-      if (code!== 0) {
-        console.error('[yt-dlp]', err.slice(0, 400));
-        return reject(new Error('yt-dlp search failed'));
-      }
+      if (code !== 0) return reject(new Error('yt-dlp search failed'));
       try {
-        resolve(
-          out.trim().split('\n').filter(Boolean).map(line => {
-            const d = JSON.parse(line);
-            return {
-              id: d.id, title: d.title,
-              duration: formatDuration(d.duration || 0),
-              thumbnail: d.thumbnail,
-              author: d.uploader || d.channel,
-              url: d.webpage_url, platform: 'youtube',
-              views: formatViews(d.view_count),
-            };
-          })
-        );
+        resolve(out.trim().split('\n').filter(Boolean).map(line => {
+          const d = JSON.parse(line);
+          return {
+            id: d.id, title: d.title,
+            duration: formatDuration(d.duration || 0),
+            thumbnail: d.thumbnail,
+            author: d.uploader || d.channel,
+            url: d.webpage_url, platform: 'youtube',
+            views: formatViews(d.view_count),
+          };
+        }));
       } catch { reject(new Error('yt-dlp parse failed')); }
     });
   });
 }
-
+// ─── utils/ytdlp.js (Part 2) ──────────────────────────────────────────────────
 export async function getMediaInfo(url) {
   const platform = detectPlatform(url);
-  const videoId = platform === 'youtube'? extractYouTubeId(url) : null;
-
+  const videoId = platform === 'youtube' ? extractYouTubeId(url) : null;
   if (videoId) {
     try {
       const info = await getInfoViaInnerTube(videoId, url);
       if (info) return info;
     } catch (e) { console.warn('[Info] InnerTube failed:', e.message); }
   }
-
   if (YT_KEY && videoId) {
     try { return await getYouTubeAPIInfo(url, videoId); } catch {}
   }
-
   return getInfoViaYtdlp(url, platform);
 }
 
 async function getInfoViaInnerTube(videoId, originalUrl) {
-  const res = await fetch(
-    `https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-YouTube-Client-Name': '1',
-        'X-YouTube-Client-Version': INNERTUBE_VER,
-        'User-Agent': BROWSER_UA,
-        'Origin': 'https://www.youtube.com',
-      },
-      body: JSON.stringify({
-        videoId,
-        context: { client: { clientName: 'WEB', clientVersion: INNERTUBE_VER, hl: 'en', gl: 'US' } },
-      }),
-      signal: AbortSignal.timeout(10000),
-    }
-  );
+  const res = await fetch(`https://www.youtube.com/youtubei/v1/player?key=${INNERTUBE_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-YouTube-Client-Name': '1', 'X-YouTube-Client-Version': INNERTUBE_VER, 'User-Agent': BROWSER_UA, 'Origin': 'https://www.youtube.com' },
+    body: JSON.stringify({ videoId, context: { client: { clientName: 'WEB', clientVersion: INNERTUBE_VER, hl: 'en', gl: 'US' } } }),
+    signal: AbortSignal.timeout(10000),
+  });
   if (!res.ok) throw new Error(`InnerTube player HTTP ${res.status}`);
   const d = await res.json();
   const det = d?.videoDetails;
   if (!det) throw new Error('No videoDetails');
   return {
-    id: videoId,
-    title: det.title || 'Unknown',
-    author: det.author || '',
+    id: videoId, title: det.title || 'Unknown', author: det.author || '',
     duration: formatDuration(parseInt(det.lengthSeconds) || 0),
     thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
     url: originalUrl, platform: 'youtube',
@@ -278,13 +228,10 @@ async function getYouTubeAPIInfo(url, videoId) {
   const item = data.items?.[0];
   if (!item) throw new Error('No item');
   return {
-    id: videoId,
-    title: item.snippet.title,
-    author: item.snippet.channelTitle,
+    id: videoId, title: item.snippet.title, author: item.snippet.channelTitle,
     duration: parseDuration(item.contentDetails.duration),
     thumbnail: item.snippet.thumbnails?.maxres?.url || item.snippet.thumbnails?.high?.url || '',
-    url: `https://www.youtube.com/watch?v=${videoId}`,
-    platform: 'youtube',
+    url: `https://www.youtube.com/watch?v=${videoId}`, platform: 'youtube',
     views: formatViews(parseInt(item.statistics?.viewCount)),
     formats: [
       { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
@@ -297,47 +244,28 @@ async function getYouTubeAPIInfo(url, videoId) {
 
 function getInfoViaYtdlp(url, platform) {
   return new Promise((resolve, reject) => {
-    const args = [
-      '--dump-json', '--no-playlist', '--no-warnings', '--skip-download',
-      '--add-header', `User-Agent:${BROWSER_UA}`,
-    ];
-
-    console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
-    console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
-
-    if (fs.existsSync(COOKIE_FILE)) {
-      args.push('--cookies', COOKIE_FILE);
-    }
-
+    const args = ['--dump-json', '--no-playlist', '--no-warnings', '--skip-download', '--add-header', `User-Agent:${ANDROID_UA}`];
+    if (fs.existsSync(COOKIE_FILE)) args.push('--cookies', COOKIE_FILE);
     if (platform === 'youtube') {
       args.push('--extractor-args', 'youtube:player_client=android');
-      args.push('--force-ipv4'); // Force IPv4 to bypass Render IPv6 blocks
+      args.push('--force-ipv4');
     }
-
     args.push(url);
-
     const proc = spawn(YTDLP, args);
     let out = '';
     proc.stdout.on('data', d => out += d);
     const t = setTimeout(() => { proc.kill(); reject(new Error('Info timed out')); }, 20000);
     proc.on('close', code => {
       clearTimeout(t);
-      if (code!== 0) return reject(new Error('Could not fetch media info'));
+      if (code !== 0) return reject(new Error('Could not fetch media info'));
       try {
         const d = JSON.parse(out.trim().split('\n')[0]);
         resolve({
-          id: d.id, title: d.title || 'Unknown',
-          author: d.uploader || d.channel || '',
+          id: d.id, title: d.title || 'Unknown', author: d.uploader || d.channel || '',
           duration: formatDuration(d.duration || 0),
-          thumbnail: d.thumbnail || '',
-          url: d.webpage_url || url, platform,
+          thumbnail: d.thumbnail || '', url: d.webpage_url || url, platform,
           views: formatViews(d.view_count),
-          formats: [
-            { label: 'MP3 128kbps', type: 'mp3', quality: '128' },
-            { label: 'MP3 320kbps', type: 'mp3', quality: '320' },
-            { label: 'MP4 720p', type: 'mp4', quality: '720' },
-            { label: 'MP4 1080p', type: 'mp4', quality: '1080' },
-          ],
+          formats: [ { label: 'MP3 128kbps', type: 'mp3', quality: '128' }, { label: 'MP3 320kbps', type: 'mp3', quality: '320' }, { label: 'MP4 720p', type: 'mp4', quality: '720' }, { label: 'MP4 1080p', type: 'mp4', quality: '1080' } ],
         });
       } catch { reject(new Error('Parsing failed')); }
     });
@@ -345,60 +273,29 @@ function getInfoViaYtdlp(url, platform) {
 }
 
 export function streamDownload(url, format, quality, res, filename) {
-  const args = [
-    '--no-warnings', '--no-playlist', '-o', '-',
-    '--add-header', `User-Agent:${BROWSER_UA}`,
-    '--add-header', 'Accept-Language:en-US,en;q=0.9',
-    '--extractor-retries', '3',
-    '--sleep-requests', '1',
-  ];
-
-  console.log('[yt-dlp] Checking for cookies at:', COOKIE_FILE);
-  console.log('[yt-dlp] Cookies exist?', fs.existsSync(COOKIE_FILE));
-
-  if (fs.existsSync(COOKIE_FILE)) {
-    args.push('--cookies', COOKIE_FILE);
-  }
-
+  const args = ['--no-warnings', '--no-playlist', '-o', '-', '--add-header', `User-Agent:${ANDROID_UA}`, '--extractor-retries', '3', '--sleep-requests', '1'];
+  if (fs.existsSync(COOKIE_FILE)) args.push('--cookies', COOKIE_FILE);
   const platform = detectPlatform(url);
   if (platform === 'youtube') {
     args.push('--extractor-args', 'youtube:player_client=android');
-    args.push('--force-ipv4'); // Force IPv4 to bypass Render IPv6 blocks
+    args.push('--force-ipv4');
   }
-
-  if (format === 'mp3') {
-    args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320'? '0' : '5');
-  } else {
-    const h = ['1080','720','480','360'].includes(quality)? quality : '720';
+  if (format === 'mp3') args.push('-x', '--audio-format', 'mp3', '--audio-quality', quality === '320' ? '0' : '5');
+  else {
+    const h = ['1080', '720', '480', '360'].includes(quality) ? quality : '720';
     args.push('--format', `bestvideo[height<=${h}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`);
   }
   args.push(url);
-
   const proc = spawn(YTDLP, args);
-  res.setHeader('Content-Type', format === 'mp3'? 'audio/mpeg' : 'video/mp4');
+  res.setHeader('Content-Type', format === 'mp3' ? 'audio/mpeg' : 'video/mp4');
   res.setHeader('Content-Disposition', `attachment; filename="${(filename || 'cymortune').replace(/[^\w\s-]/g, '')}.${format}"`);
   proc.stdout.pipe(res);
   proc.stderr.on('data', d => console.warn('[DL]', d.toString().slice(0, 200)));
-  proc.on('close', (code) => {
-    if (code!== 0) console.error('[DL] yt-dlp exited with code', code);
-    try { res.end(); } catch {}
-  });
+  proc.on('close', (code) => { if (code !== 0) console.error('[DL] exit code', code); try { res.end(); } catch {} });
   res.on('close', () => { try { proc.kill(); } catch {} });
 }
 
-function extractYouTubeId(url) {
-  return url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/)?.[1] || null;
-}
-function parseDuration(iso) {
-  const m = iso?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!m) return '0:00';
-  return `${m[1]? m[1] + ':' : ''}${m[2] || '0'}:${String(m[3] || '0').padStart(2, '0')}`;
-}
-function formatDuration(s) {
-  if (!s || isNaN(s)) return '0:00';
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-}
-function formatViews(n) {
-  if (!n || isNaN(n)) return null;
-  return n >= 1e6? (n / 1e6).toFixed(1) + 'M' : n >= 1e3? (n / 1e3).toFixed(1) + 'K' : String(n);
-    }
+function extractYouTubeId(url) { return url.match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/)?.[1] || null; }
+function parseDuration(iso) { const m = iso?.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/); if (!m) return '0:00'; return `${m[1] ? m[1] + ':' : ''}${m[2] || '0'}:${String(m[3] || '0').padStart(2, '0')}`; }
+function formatDuration(s) { if (!s || isNaN(s)) return '0:00'; return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+function formatViews(n) { if (!n || isNaN(n)) return null; return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n); }
