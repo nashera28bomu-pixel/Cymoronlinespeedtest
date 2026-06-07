@@ -6,7 +6,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Ensure this matches the path we just created
-const YTDLP = process.env.YTDLP_PATH || './yt-dlp-bin';
+const YTDLP = process.env.YTDLP_PATH || './node_modules/yt-dlp/bin/yt-dlp';
+
 
 const YT_KEY = process.env.YT_API_KEY || '';
 const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY || '';
