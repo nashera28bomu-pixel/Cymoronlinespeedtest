@@ -1,45 +1,37 @@
-// ─── routes/search.js ─────────────────────────────────────────────────────────
+// ─── routes/search.js ────────────────────────────────────────────────────────
 import express from 'express';
-import { searchYoutube, getMediaInfo } from '../utils/ytdlp.js';
+import { searchTracks } from '../utils/ytdlp.js';
 
 const router = express.Router();
 
-// GET /api/search?q=query&limit=12
+// GET /api/search?q=rema+calm+down&mode=music&limit=12
+// mode: 'music' (default) → SoundCloud first  |  'video' → YouTube first
 router.get('/', async (req, res) => {
-  const { q, limit = 12 } = req.query;
-  if (!q?.trim()) return res.status(400).json({ error: 'Query is required' });
+  const { q, query, mode = 'music', limit = '12' } = req.query;
+  const searchQuery = (q || query || '').trim();
 
-  try {
-    console.log(`[Search] "${q}"`);
-    const results = await searchYoutube(q.trim(), Math.min(parseInt(limit) || 12, 20));
-    console.log(`[Search] Found ${results.length} results for "${q}"`);
-    res.json({ success: true, results, query: q });
-  } catch (err) {
-    console.error(`[Search error] ${err.message}`);
-    // Return user-friendly error, not raw yt-dlp message
-    res.status(500).json({
-      success: false,
-      error: 'Search temporarily unavailable. Please try again.',
-      detail: err.message,
-    });
+  if (!searchQuery) {
+    return res.status(400).json({ error: 'Query parameter ?q= is required' });
   }
-});
 
-// GET /api/search/info?url=...
-router.get('/info', async (req, res) => {
-  const { url } = req.query;
-  if (!url?.trim()) return res.status(400).json({ error: 'URL is required' });
+  const parsedLimit = Math.min(Math.max(parseInt(limit) || 12, 1), 20);
 
   try {
-    console.log(`[Info] ${url.slice(0, 80)}`);
-    const info = await getMediaInfo(url.trim());
-    res.json({ success: true, info });
+    const results = await searchTracks(searchQuery, parsedLimit, mode);
+    return res.json({
+      success: true,
+      query: searchQuery,
+      mode,
+      source: results[0]?.platform || 'unknown',
+      count: results.length,
+      results,
+    });
   } catch (err) {
-    console.error(`[Info error] ${err.message}`);
-    res.status(500).json({
+    console.error('[Search route] Error:', err.message);
+    return res.status(500).json({
       success: false,
-      error: 'Could not fetch media info. Check the URL and try again.',
-      detail: err.message,
+      error: 'Search failed. Please try again.',
+      details: err.message,
     });
   }
 });
